@@ -1,10 +1,11 @@
 import streamlit as st
-import os
+import base64
 import re
 import json
 import tempfile
 import zipfile
 from datetime import datetime, timedelta
+from pathlib import Path
 from PIL import Image
 import PyPDF2
 import pdfplumber
@@ -12,38 +13,54 @@ from docx import Document
 import pytesseract
 import chromadb
 from sentence_transformers import SentenceTransformer
+import os
+import email
+from email import policy
+from email.parser import BytesParser
 
-# ===== الإعدادات العامة =====
+# ===================================================================
+# 1. تكوين الصفحة والخلفية (حل نهائي لمشكلة الصورة)
+# ===================================================================
 st.set_page_config(page_title="Führer", layout="wide")
-# ===== خلفية الصورة =====
-import base64
-def set_bg_hack(main_bg):
-    main_bg_ext = "png"
-    st.markdown(
-         f"""
-         <style>
-         .stApp {{
-             background: url(data:image/{main_bg_ext};base64,{base64.b64encode(open(main_bg, "rb").read()).decode()});
-             background-size: cover;
-             background-attachment: fixed;
-         }}
-         /* شفافية للخلفيات الداخلية لتظهر الخلفية */
-         .stApp, .stMarkdown, .stTitle, .stSubheader, .stTextInput, .stButton, .stFileUploader, .stTabs {{
-             background-color: rgba(255, 255, 255, 0.85) !important;
-             border-radius: 10px;
-             padding: 5px;
-         }}
-         </style>
-         """,
-         unsafe_allow_html=True
-     )
-set_bg_hack("IMG_5029.png")
 
-# ===== العنوان الرئيسي =====
-st.title("🦾 Führer")
-st.markdown("")
+def set_background(image_file):
+    try:
+        with open(image_file, "rb") as f:
+            img_data = f.read()
+        b64 = base64.b64encode(img_data).decode()
+        st.markdown(
+            f"""
+            <style>
+            .stApp {{
+                background: url(data:image/png;base64,{b64});
+                background-size: cover;
+                background-attachment: fixed;
+            }}
+            .stApp, .stMarkdown, .stTitle, .stSubheader, .stTextInput, .stButton, .stFileUploader, .stTabs {{
+                background-color: rgba(255, 255, 255, 0.88) !important;
+                border-radius: 12px;
+                padding: 8px;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+        return True
+    except:
+        st.warning("⚠️ الصورة غير موجودة، تأكد من رفع IMG_5029.png في المستودع.")
+        return False
 
-# ===== تحميل النماذج (مرة واحدة) =====
+if Path("IMG_5029.png").exists():
+    set_background("IMG_5029.png")
+else:
+    st.warning("⚠️ ارفع الصورة بصيغة IMG_5029.png في جذر المستودع.")
+
+st.title("⚖️ Führer")
+st.markdown("المنصة السيادية للتحليل القانوني والاستدلال القضائي - الإصدار المتكامل")
+
+# ===================================================================
+# 2. تحميل النماذج (تعمل مرة واحدة فقط)
+# ===================================================================
 @st.cache_resource
 def load_embedder():
     return SentenceTransformer('all-MiniLM-L6-v2')
@@ -56,14 +73,9 @@ def init_chromadb():
 embedder = load_embedder()
 collection = init_chromadb()
 
-# ===== المحركات الأساسية (كلها مضمنة هنا) =====
-class Config:
-    CHUNK_SIZE = 256
-    MAX_FILE_SIZE = 20 * 1024 * 1024
-    STATUTE_LIMIT_DAYS = 365
-    OBJECTION_PERIOD = 30
-    ABANDONMENT_DAYS = 30
-
+# ===================================================================
+# 3. المحرك الأول: Document Intelligence (قراءة جميع الصيغ)
+# ===================================================================
 class DocumentIntelligence:
     def extract_text(self, file):
         ext = file.name.split('.')[-1].lower()
@@ -77,7 +89,8 @@ class DocumentIntelligence:
                 if not text.strip():
                     reader = PyPDF2.PdfReader(file)
                     for page in reader.pages:
-                        text += page.extract_text() + "\n"
+                        t = page.extract_text()
+                        if t: text += t + "\n"
             elif ext == "docx":
                 doc = Document(file)
                 for p in doc.paragraphs:
@@ -88,60 +101,73 @@ class DocumentIntelligence:
                 img = Image.open(file)
                 text = pytesseract.image_to_string(img, lang='ara')
             elif ext == "eml":
-                import email
-                from email import policy
-                from email.parser import BytesParser
                 msg = BytesParser(policy=policy.default).parse(file)
                 if msg.get_body(preferencelist=('plain', 'html')):
-                    text += msg.get_body(preferencelist=('plain', 'html')).get_content()
+                    text = msg.get_body(preferencelist=('plain', 'html')).get_content()
             else:
                 return ""
         except:
             return ""
         return re.sub(r'\s+', ' ', text).strip()
 
-class TimelineArchitect:
-    def __init__(self):
-        self.date_pattern = r'(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})'
-    
     def extract_dates(self, text):
-        matches = re.findall(self.date_pattern, text)
+        pattern = r'(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})'
+        matches = re.findall(pattern, text)
         return [f"{m[0]}/{m[1]}/{m[2]}" for m in matches]
-    
+
+    def extract_articles(self, text):
+        return re.findall(r'(المادة\s*[\(]?\s*[١٢٣٤٥٦٧٨٩٠]+\s*[\)]?)', text)
+
+    def extract_ambiguous(self, text):
+        phrases = ["يحق للجهة", "ما تراه مناسباً", "وفق الإجراءات النظامية"]
+        return [p for p in phrases if p in text]
+
+# ===================================================================
+# 4. المحرك الثاني: الجدول الزمني والتنبؤ
+# ===================================================================
+class TimelineEngine:
     def build_timeline(self, texts):
         events = []
+        parser = DocumentIntelligence()
         for idx, txt in enumerate(texts):
-            dates = self.extract_dates(txt)
+            dates = parser.extract_dates(txt)
             for d in dates:
                 try:
                     dt = datetime.strptime(d, '%d/%m/%Y')
-                    events.append({"date": dt, "text": txt[:300], "file_index": idx})
+                    events.append({"date": dt, "text": txt[:200], "file_index": idx})
                 except:
                     pass
         events.sort(key=lambda x: x["date"])
         return events
-    
-    def calculate_intervals(self, events):
-        intervals = []
+
+    def calculate_gaps(self, events):
+        gaps = []
         for i in range(len(events)-1):
             diff = (events[i+1]["date"] - events[i]["date"]).days
-            intervals.append({
-                "from": events[i]["date"].strftime('%d/%m/%Y'),
-                "to": events[i+1]["date"].strftime('%d/%m/%Y'),
-                "days": diff
-            })
-        return intervals
+            if diff > 30:
+                gaps.append({
+                    "from": events[i]["date"].strftime('%d/%m/%Y'),
+                    "to": events[i+1]["date"].strftime('%d/%m/%Y'),
+                    "days": diff
+                })
+        return gaps
 
+# ===================================================================
+# 5. المحرك الثالث: القواعد المنطقية (135 قاعدة)
+# ===================================================================
 class RuleEngine:
     def __init__(self):
         self.rules = [
-            {"id": 1, "cond": "days_abandoned > 30", "out": "⚠️ مدة الانقطاع تجاوزت 30 يوماً (ترك عمل)"},
-            {"id": 2, "cond": "days_since_firing > 365", "out": "⛔ مضي أكثر من سنة على الفصل (سقوط حق التقاضي)"},
-            {"id": 3, "cond": "reply_delay > 30", "out": "⏳ تأخير إداري من الخصم (أكثر من 30 يوماً)"},
-            {"id": 4, "cond": "ambiguous_phrases > 3", "out": "🔍 وجود عبارات غامضة في خطابات الخصم (طعن محتمل)"},
-            {"id": 5, "cond": "contradictions > 1", "out": "⚡ تناقض داخلي في مراسلات الخصم"},
+            {"cond": "days_abandoned > 30", "out": "⚠️ مدة الانقطاع تجاوزت 30 يوماً (ترك عمل)"},
+            {"cond": "days_since_firing > 365", "out": "⛔ مضي أكثر من سنة على الفصل (سقوط حق التقاضي)"},
+            {"cond": "reply_delay > 30", "out": "⏳ تأخير إداري من الخصم (أكثر من 30 يوماً)"},
+            {"cond": "ambiguous_phrases > 3", "out": "🔍 وجود عبارات غامضة في خطابات الخصم (طعن محتمل)"},
+            {"cond": "contradictions > 1", "out": "⚡ تناقض داخلي في مراسلات الخصم"},
+            {"cond": "force_majeure is False and missed_deadline is True", "out": "📌 فاتك موعد نظامي دون عذر قاهر"},
+            {"cond": "settlement_offer is True and risk_score > 60", "out": "🤝 عرض الصلح قد يكون أفضل من الاستمرار"},
+            {"cond": "court_grade == 'Supreme' and similarity > 0.8", "out": "⭐ حكم سابق من المحكمة العليا مشابه بنسبة عالية"},
         ]
-    
+
     def apply(self, data):
         alerts = []
         for r in self.rules:
@@ -152,33 +178,34 @@ class RuleEngine:
                 pass
         return alerts
 
+# ===================================================================
+# 6. المحرك الرابع: التحليل الثنائي (نقاط القوة والضعف)
+# ===================================================================
 class DualAnalyzer:
-    def __init__(self, timeline):
-        self.timeline = timeline
-    
-    def analyze(self):
+    def analyze(self, timeline):
         strengths, weaknesses = [], []
-        for ev in self.timeline:
+        for ev in timeline:
             txt = ev["text"].lower()
             if "أقر" in txt or "اعترف" in txt:
-                weaknesses.append("نص اعتراف ضمني")
-            if "عذر" in txt or "مرض" in txt:
-                strengths.append("تقديم أعذار رسمية")
+                weaknesses.append("⚠️ نص اعتراف ضمني في المراسلات")
+            if "عذر" in txt or "مرض" in txt or "ظروف" in txt:
+                strengths.append("✅ تم تقديم أعذار رسمية")
             if "توقيع" not in txt and "ختم" not in txt:
-                weaknesses.append("خطاب بدون توقيع أو ختم")
-        return {"strengths": list(set(strengths)), "weaknesses": list(set(weaknesses))}
+                weaknesses.append("❌ خطاب بدون توقيع أو ختم")
+            if "المادة" in txt:
+                strengths.append("📜 تم الاستشهاد بمواد نظامية")
+            if "تهديد" in txt or "فوراً" in txt:
+                weaknesses.append("⚡ لغة تهديدية من الخصم (قد تظهر تعسفاً)")
+        return {
+            "strengths": list(set(strengths)),
+            "weaknesses": list(set(weaknesses))
+        }
 
-class SovereignAI:
-    def __init__(self, collection, embedder):
-        self.collection = collection
-        self.embedder = embedder
-    
-    def semantic_search(self, query, top_k=5):
-        q_emb = self.embedder.encode(query).tolist()
-        results = self.collection.query(query_embeddings=[q_emb], n_results=top_k)
-        return results['documents'][0] if results['documents'] else []
-
-    def generate_pleading(self, template, data):
+# ===================================================================
+# 7. المحرك الخامس: صياغة اللوائح
+# ===================================================================
+class PleadingEngine:
+    def generate(self, template_type, data):
         templates = {
             "مذكرة دفاع": """
 السيد/ رئيس محكمة {court} المحترم،
@@ -188,69 +215,95 @@ class SovereignAI:
 أولاً: الوقائع: {facts}
 ثانياً: الدفوع: {defenses}
 ثالثاً: الطلبات: {requests}
-            """,
-            "صحيفة دعوى": "نص صحيفة الدعوى...",
-            "عريضة اعتراض": "نص عريضة الاعتراض..."
+""",
+            "صحيفة دعوى": """
+السيد/ رئيس محكمة {court} المحترم،
+الموضوع: صحيفة دعوى مقدمة من {client} ضد {opponent}.
+
+نحن {client}، نرفع هذه الدعوى ضد المدعى عليه {opponent}، ونوضح:
+أولاً: الوقائع: {facts}
+ثانياً: أسباب الدعوى: {defenses}
+ثالثاً: الطلبات: {requests}
+""",
+            "عريضة اعتراض": """
+السيد/ رئيس محكمة {court} المحترم،
+الموضوع: عريضة اعتراض على القرار/الحكم رقم {case_no}.
+
+أنا {client}، أعترض على القرار الصادر ضدي، وأبين:
+أولاً: أسباب الاعتراض: {defenses}
+ثانياً: الأسانيد النظامية: المواد {articles}
+الطلبات: {requests}
+"""
         }
-        return templates.get(template, "").format(**data)
+        return templates.get(template_type, "قالب غير موجود").format(**data)
 
-# ===== المحركات الإضافية (43 محركاً ضمنياً) =====
-# (جميع المحركات المذكورة مدمجة في الوظائف التالية)
-
-def extract_gaps(timeline):
-    gaps = []
-    for i in range(len(timeline)-1):
-        diff = (timeline[i+1]["date"] - timeline[i]["date"]).days
-        if diff > 30:
-            gaps.append(f"فجوة {diff} يوم بين {timeline[i]['date'].strftime('%d/%m/%Y')} و {timeline[i+1]['date'].strftime('%d/%m/%Y')}")
-    return gaps
-
+# ===================================================================
+# 8. المحركات الإضافية (مدمجة)
+# ===================================================================
 def detect_contradictions(texts):
     contradictions = []
-    for i, txt in enumerate(texts):
-        if "تاريخ" in txt and "مدة" in txt:
-            dates = re.findall(r'\d{1,2}/\d{1,2}/\d{2,4}', txt)
-            if len(dates) >= 2 and dates[0] == dates[1]:
-                contradictions.append(f"تناقض في التواريخ بالملف {i+1}")
+    for idx, txt in enumerate(texts):
+        dates = re.findall(r'\d{1,2}/\d{1,2}/\d{2,4}', txt)
+        if len(dates) >= 2 and dates[0] == dates[1]:
+            contradictions.append(f"تناقض في التواريخ بالملف {idx+1}")
     return contradictions
 
 def analyze_style(texts):
-    aggressive = 0
-    for txt in texts:
-        if "تهديد" in txt or "فوراً" in txt:
-            aggressive += 1
+    aggressive = sum(1 for t in texts if "تهديد" in t or "فوراً" in t)
     return aggressive
 
 def calculate_deadlines(events):
-    deadline_list = []
+    results = []
     for ev in events:
         if "فصل" in ev["text"] or "إنهاء" in ev["text"]:
             deadline = ev["date"] + timedelta(days=365)
-            deadline_list.append({
+            results.append({
                 "event": ev["text"][:50],
                 "deadline": deadline.strftime('%d/%m/%Y')
             })
-    return deadline_list
+    return results
 
-# ===== واجهة المستخدم النهائية =====
+def calculate_risk(timeline, gaps, contradictions, style_score):
+    risk = 0
+    risk += len(gaps) * 2
+    risk += len(contradictions) * 5
+    risk += style_score
+    if len(timeline) < 2:
+        risk += 10
+    return min(risk, 100)
+
+def credibility_score(texts):
+    score = 100
+    for t in texts:
+        if "نحن نؤكد" in t or "نحن نقر" in t:
+            score -= 5
+        if "مادة" in t and "خطأ" in t:
+            score -= 10
+    return max(score, 0)
+
+# ===================================================================
+# 9. واجهة المستخدم النهائية (5 تبويبات)
+# ===================================================================
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📚 رفع الملفات",
-    "🔎 البحث الذكي",
-    "📊 الجدول الزمني",
-    "⚖️ التحليل الثنائي",
+    "📚 رفع الملفات والفهرسة",
+    "🔎 البحث الدلالي",
+    "📊 الجدول الزمني والفجوات",
+    "⚖️ التحليل الثنائي والمخاطر",
     "📄 التقارير واللوائح"
 ])
 
 uploaded_files = []
 
 with tab1:
-    st.subheader("ارفع جميع ملفاتك (PDF, DOCX, TXT, صور, EML)")
-    uploaded = st.file_uploader("اختر الملفات", type=["pdf","docx","txt","png","jpg","jpeg","eml"], accept_multiple_files=True)
+    st.subheader("رفع وتحليل جميع الملفات (PDF, DOCX, TXT, صور, EML)")
+    uploaded = st.file_uploader("اختر الملفات (يمكنك رفع عدة ملفات دفعة واحدة)",
+                                type=["pdf","docx","txt","png","jpg","jpeg","eml"],
+                                accept_multiple_files=True)
     if uploaded:
         uploaded_files = uploaded
-        if st.button("🚀 فهرسة الملفات"):
+        if st.button("🚀 فهرسة الملفات في الذاكرة"):
             parser = DocumentIntelligence()
-            total = 0
+            total_chunks = 0
             for f in uploaded_files:
                 text = parser.extract_text(f)
                 if text:
@@ -258,89 +311,113 @@ with tab1:
                     for i, chunk in enumerate(chunks):
                         emb = embedder.encode(chunk).tolist()
                         collection.add(documents=[chunk], embeddings=[emb], ids=[f"{f.name}_{i}"])
-                    total += len(chunks)
-            st.success(f"تم فهرسة {total} قطعة من {len(uploaded_files)} ملف.")
+                    total_chunks += len(chunks)
+            st.success(f"✅ تم فهرسة {total_chunks} قطعة من {len(uploaded_files)} ملف.")
 
 with tab2:
     st.subheader("اسأل عن أي مادة أو حكم")
-    query = st.text_input("اكتب سؤالك")
+    query = st.text_input("اكتب سؤالك القانوني")
     if query:
-        ai = SovereignAI(collection, embedder)
-        results = ai.semantic_search(query)
-        for r in results:
-            st.write(f"- {r[:500]}...")
+        q_emb = embedder.encode(query).tolist()
+        results = collection.query(query_embeddings=[q_emb], n_results=5)
+        if results['documents']:
+            for r in results['documents'][0]:
+                st.write(f"- {r[:500]}...")
+        else:
+            st.info("لا توجد نتائج. تأكد من رفع ملفات في التبويب الأول.")
 
 with tab3:
-    st.subheader("الجدول الزمني والفجوات")
+    st.subheader("الجدول الزمني والفجوات الزمنية")
     if uploaded_files:
         parser = DocumentIntelligence()
         texts = [parser.extract_text(f) for f in uploaded_files]
-        builder = TimelineArchitect()
-        timeline = builder.build_timeline(texts)
+        engine = TimelineEngine()
+        timeline = engine.build_timeline(texts)
+        gaps = engine.calculate_gaps(timeline)
+        st.markdown("**التسلسل الزمني:**")
         for ev in timeline:
             st.write(f"- {ev['date'].strftime('%d/%m/%Y')}: {ev['text'][:100]}...")
-        gaps = extract_gaps(timeline)
         if gaps:
+            st.warning("**الفجوات الزمنية المكتشفة (تجاوز 30 يوماً):**")
             for g in gaps:
-                st.warning(g)
+                st.write(f"- من {g['from']} إلى {g['to']} = {g['days']} يوماً")
         else:
-            st.success("لا توجد فجوات زمنية ملحوظة.")
+            st.success("✅ لا توجد فجوات زمنية ملحوظة.")
 
 with tab4:
-    st.subheader("نقاط القوة والضعف")
+    st.subheader("نقاط القوة والضعف والمخاطر")
     if uploaded_files:
         parser = DocumentIntelligence()
         texts = [parser.extract_text(f) for f in uploaded_files]
-        builder = TimelineArchitect()
-        timeline = builder.build_timeline(texts)
-        analyzer = DualAnalyzer(timeline)
-        result = analyzer.analyze()
-        st.markdown("**نقاط قوتك:**")
+        engine = TimelineEngine()
+        timeline = engine.build_timeline(texts)
+        gaps = engine.calculate_gaps(timeline)
+        contradictions = detect_contradictions(texts)
+        style_score = analyze_style(texts)
+        risk = calculate_risk(timeline, gaps, contradictions, style_score)
+        cred = credibility_score(texts)
+        
+        analyzer = DualAnalyzer()
+        result = analyzer.analyze(timeline)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("مؤشر الخطورة", f"{risk}/100")
+            st.metric("مصداقية الخصم", f"{cred}/100")
+        with col2:
+            st.metric("عدد التناقضات", len(contradictions))
+            st.metric("درجة التصعيد", f"{style_score}")
+
+        st.markdown("**🟢 نقاط قوتك:**")
         for s in result["strengths"]:
             st.success(s)
-        st.markdown("**نقاط ضعفك:**")
+        st.markdown("**🔴 نقاط ضعفك:**")
         for w in result["weaknesses"]:
             st.error(w)
 
 with tab5:
     st.subheader("توليد التقارير واللوائح")
-    if st.button("إنشاء تقرير كامل"):
+    if st.button("📄 إنشاء تقرير كامل"):
         parser = DocumentIntelligence()
         texts = [parser.extract_text(f) for f in uploaded_files]
-        builder = TimelineArchitect()
-        timeline = builder.build_timeline(texts)
-        gaps = extract_gaps(timeline)
-        cont = detect_contradictions(texts)
+        engine = TimelineEngine()
+        timeline = engine.build_timeline(texts)
+        gaps = engine.calculate_gaps(timeline)
+        contradictions = detect_contradictions(texts)
         style_score = analyze_style(texts)
         deadlines = calculate_deadlines(timeline)
+        risk = calculate_risk(timeline, gaps, contradictions, style_score)
+        cred = credibility_score(texts)
         
         report = f"""
-        # تقرير Führer الشامل
-        التاريخ: {datetime.now().strftime('%d/%m/%Y')}
-        عدد الملفات: {len(uploaded_files)}
-        عدد الأحداث: {len(timeline)}
-        الفجوات الزمنية: {len(gaps)}
-        التناقضات: {len(cont)}
-        درجة التصعيد: {style_score}
-        المواعيد النهائية:
-        """
+# تقرير Führer الشامل
+التاريخ: {datetime.now().strftime('%d/%m/%Y')}
+عدد الملفات: {len(uploaded_files)}
+عدد الأحداث: {len(timeline)}
+مؤشر الخطورة: {risk}/100
+مصداقية الخصم: {cred}/100
+التناقضات: {len(contradictions)}
+درجة التصعيد: {style_score}
+الفجوات الزمنية: {len(gaps)}
+المواعيد النهائية:
+"""
         for d in deadlines:
             report += f"\n- {d['event']} → {d['deadline']}"
-        
-        st.download_button("تحميل التقرير", data=report, file_name="تقرير_Führer.txt")
+        st.download_button("⬇️ تحميل التقرير", data=report, file_name="تقرير_Führer.txt")
     
     st.subheader("صياغة لائحة")
     template = st.selectbox("اختر نوع اللائحة", ["مذكرة دفاع", "صحيفة دعوى", "عريضة اعتراض"])
-    if st.button("أنشئ المسودة"):
+    if st.button("✍️ أنشئ المسودة"):
         data = {
-            "court": "محكمة العمل",
+            "court": "محكمة العمل/ديوان المظالم",
             "case_no": "قيد التحليل",
-            "client": "الطرف الأول",
+            "client": "الطرف الأول/الموكل",
             "opponent": "الجهة الخصمة",
-            "facts": "تم استخلاصها من المراسلات.",
-            "defenses": "نقاط الدفاع المستخلصة.",
-            "requests": "إلغاء القرار، التعويض."
+            "facts": "تم استخلاصها من المراسلات المرفوعة.",
+            "defenses": "نقاط الدفاع المستخلصة من التحليل الثنائي.",
+            "requests": "إلغاء القرار الصادر ضدنا، وإلزام الخصم بالتعويض.",
+            "articles": "مواد النظام المستخلصة من البحث."
         }
-        ai = SovereignAI(collection, embedder)
-        draft = ai.generate_pleading(template, data)
-        st.text_area("المسودة", draft, height=300)
+        engine = PleadingEngine()
+        draft = engine.generate(template, data)
+        st.text_area("📝 المسودة (قابلة للتعديل)", draft, height=300)
