@@ -666,7 +666,7 @@ def call_ai(prompt: str, doc_ctx: str = "") -> str:
 # SIDEBAR
 # ══════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("### ⚖️ Führer v2.0")
+    st.markdown("### ⚖️ Führer ")
     st.markdown("---")
 
     st.markdown("**🤖 النموذج الذكي**")
