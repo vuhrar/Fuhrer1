@@ -1227,4 +1227,3 @@ with t_tools:
 
 st.markdown('<hr><p style="text-align:center;color:#303848;font-size:11px">Führer |Claude · Gemini · Groq</p>', unsafe_allow_html=True)
 PYEOF
-echo "Lines: $(wc -l < /mnt/user-data/outputs/fuehrer_v2.py)"
