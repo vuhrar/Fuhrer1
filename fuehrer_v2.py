@@ -383,34 +383,39 @@ def build_system():
 - استند للأنظمة السعودية واذكر المواد
 - كن محدداً وعملياً
 - أجب بالعربية الفصحى{mem_ctx}"""
+ st.markdown("**🤖 النموذج**")
+    provider = st.selectbox("النموذج", [
+        "Gemini (Google) — مجاني",
+        "Groq (مجاني وسريع)",
+        "Claude (Anthropic)",
+    ], label_visibility="collapsed",
+       index=["Gemini (Google) — مجاني","Groq (مجاني وسريع)","Claude (Anthropic)"].index(
+           st.session_state.ai_provider) if st.session_state.ai_provider in
+           ["Gemini (Google) — مجاني","Groq (مجاني وسريع)","Claude (Anthropic)"] else 0)
 
+    if provider != st.session_state.ai_provider:
+        st.session_state.ai_provider = provider
+        save_settings()
 
-import urllib.request
-import json
-import streamlit as st
+    if "Gemini" in provider:
+        k = st.text_input("Gemini Key", value=st.session_state.gemini_key,
+                          type="password", label_visibility="collapsed",
+                          placeholder="AIza...")
+        if k != st.session_state.gemini_key:
+            st.session_state.gemini_key = k
+            save_settings()
+        st.markdown("[🔑 احصل على Key مجاني](https://aistudio.google.com/apikey)")
+        if k: st.success("✅ محفوظ")
 
-def call_any_api(api_url, payload, headers=None):
-    default_headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
-    }
-    if headers:
-        default_headers.update(headers)
-        
-    req = urllib.request.Request(
-        api_url,
-        data=json.dumps(payload).encode(),
-        headers=default_headers,
-        method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=90) as r:
-            return json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        return f"❌ Error {e.code}: {e.read().decode()[:200]}"
-    except Exception as e:
-        return f"❌ {e}"
-
+    elif "Groq" in provider:
+        k = st.text_input("Groq Key", value=st.session_state.groq_key,
+                          type="password", label_visibility="collapsed",
+                          placeholder="gsk_...")
+        if k != st.session_state.groq_key:
+            st.session_state.groq_key = k
+            save_settings()
+        st.markdown("[🔑 احصل على Key مجاني](https://console.groq.com)")
+        if k: st.success("✅ محفوظ")
 # ══════════════════════════════════════════════
 # SIDEBAR
 # ══════════════════════════════════════════════
@@ -419,8 +424,39 @@ with st.sidebar:
     st.markdown("---")
 
     # النموذج والمفاتيح
-   
+    st.markdown("**🤖 النموذج**")
+    provider = st.selectbox("النموذج", [
+        "Gemini (Google) — مجاني",
+        "Groq (مجاني وسريع)",
+        "Claude (Anthropic)",
+    ], label_visibility="collapsed",
+       index=["Gemini (Google) — مجاني","Groq (مجاني وسريع)","Claude (Anthropic)"].index(
+           st.session_state.ai_provider) if st.session_state.ai_provider in
+           ["Gemini (Google) — مجاني","Groq (مجاني وسريع)","Claude (Anthropic)"] else 0)
 
+    if provider != st.session_state.ai_provider:
+        st.session_state.ai_provider = provider
+        save_settings()
+
+    if "Gemini" in provider:
+        k = st.text_input("Gemini Key", value=st.session_state.gemini_key,
+                          type="password", label_visibility="collapsed",
+                          placeholder="AIza...")
+        if k != st.session_state.gemini_key:
+            st.session_state.gemini_key = k
+            save_settings()
+        st.markdown("[🔑 احصل على Key مجاني](https://aistudio.google.com/apikey)")
+        if k: st.success("✅ محفوظ")
+
+    elif "Groq" in provider:
+        k = st.text_input("Groq Key", value=st.session_state.groq_key,
+                          type="password", label_visibility="collapsed",
+                          placeholder="gsk_...")
+        if k != st.session_state.groq_key:
+            st.session_state.groq_key = k
+            save_settings()
+        st.markdown("[🔑 احصل على Key مجاني](https://console.groq.com)")
+        if k: st.success("✅ محفوظ")
     # الجلسات
     st.markdown("**💬 الجلسات المحفوظة**")
     if st.button("➕ جلسة جديدة", use_container_width=True):
