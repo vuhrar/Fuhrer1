@@ -1,14 +1,6 @@
-cat > /mnt/user-data/outputs/fuehrer_v2.py << 'PYEOF'
+<< 'PYEOF'
 """
-Führer v2.0 — نظام الذكاء القانوني السعودي
-✅ كل الأخطاء مصلحة
-✅ أي نموذج ذكاء اصطناعي
-✅ قاعدة بيانات قانونية كاملة
-✅ رفع أي نوع ملف
-✅ خلفية مخصصة
-✅ سياق طويل + ذاكرة دائمة
-✅ جلسات متعددة لا تُحذف إلا باختيار
-"""
+Führer """
 
 import streamlit as st
 import re, io, os, json, logging, hashlib, base64
@@ -833,7 +825,7 @@ with st.sidebar:
 # ══════════════════════════════════════════════
 st.markdown("""
 <div class="hdr">
-<h1 style="margin:0;font-size:24px">⚖️ Führer v2.0 | نظام الذكاء القانوني السعودي</h1>
+<h1 style="margin:0;font-size:24px">⚖️ Führer 
 <p style="color:#8090a0;margin:4px 0 0;font-size:12px">
 سري • دائم • أي نموذج ذكاء • قاعدة قانونية شاملة
 </p>
