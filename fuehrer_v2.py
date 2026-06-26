@@ -438,7 +438,7 @@ def build_system():
         if last_q:
             q_words = set(re.findall(r"[\u0600-\u06ff]{3,}", last_q))
             scored = sorted(
-                [(sum(1 for w in q_words if w in r.get("text", ""))i, r)
+                [(sum(1 for w in q_words if w in r.get("text", "")), i, r)
                  for r in st.session_state.law_db], reverse=True)
             relevant = [(sc, r) for sc, r in scored if sc > 0][:5]
             if relevant:
